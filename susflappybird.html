@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bio-Gauntlet: The Great Journey</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #1a0505;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* Container ensures everything stays together and centered */
+        #game-container {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 400px; /* Match canvas width */
+            padding: 10px;
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 1.5rem;
+            letter-spacing: 2px;
+            color: #ff4d4d;
+            text-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+        }
+
+        canvas {
+            border: 4px solid #4a0000;
+            border-radius: 8px;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+            background-color: #2b0000;
+            cursor: pointer;
+            /* Responsive Magic: */
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .controls-hint {
+            margin-top: 10px;
+            font-size: 0.9rem;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <h1>BIO-GAUNTLET</h1>
+        <canvas id="gameCanvas"></canvas>
+        <div class="controls-hint">Press SPACE or TAP to Swim</div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Internal resolution (logical size)
+    canvas.width = 400;
+    canvas.height = 600;
+
+    const GRAVITY = 0.22;
+    const JUMP = -4.8;
+    const PIPE_SPEED = 2.8;
+    const PIPE_GAP = 180; // Slightly wider gap for better gameplay
+    const PIPE_WIDTH = 65;
+
+    let score = 0;
+    let frameCount = 0;
+    let gameOver = false;
+    let gameStarted = false;
+
+    const sperm = {
+        x: 60,
+        y: 300,
+        velocity: 0,
+        radius: 7,
+        tailPhase: 0,
+        
+        draw() {
+            ctx.save();
+            // Pulse effect for the head
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "white";
+            ctx.fillStyle = "white";
+            
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            // Animated tail
+            ctx.beginPath();
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
+            ctx.lineWidth = 3;
+            ctx.lineCap = "round";
+            ctx.moveTo(this.x, this.y);
+            for (let i = 0; i < 25; i++) {
+                const tx = this.x - i * 2.5;
+                const ty = this.y + Math.sin(this.tailPhase + i * 0.4) * (i * 0.7);
+                ctx.lineTo(tx, ty);
+            }
+            ctx.stroke();
+            this.tailPhase += 0.25;
+        },
+
+        update() {
+            if (!gameStarted) {
+                // Hover effect before start
+                this.y = 300 + Math.sin(frameCount * 0.05) * 10;
+                return;
+            }
+            this.velocity += GRAVITY;
+            this.y += this.velocity;
+            
+            // Boundary check
+            if (this.y + this.radius > canvas.height || this.y - this.radius < 0) {
+                endGame();
+            }
+        }
+    };
+
+    let pipes = [];
+
+    function spawnPipe() {
+        const padding = 80; // Ensure pipes aren't too short to see
+        const height = Math.floor(Math.random() * (canvas.height - PIPE_GAP - (padding * 2))) + padding;
+        
+        pipes.push({
+            x: canvas.width,
+            top: height,
+            passed: false
+        });
+    }
+
+    function drawPipes() {
+        pipes.forEach(pipe => {
+            // Gradient for "organic" look
+            const grad = ctx.createLinearGradient(pipe.x, 0, pipe.x + PIPE_WIDTH, 0);
+            grad.addColorStop(0, "#8b0000");
+            grad.addColorStop(0.5, "#c80032");
+            grad.addColorStop(1, "#8b0000");
+            
+            ctx.fillStyle = grad;
+            
+            // Top pipe
+            ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.top);
+            // Bottom pipe
+            ctx.fillRect(pipe.x, pipe.top + PIPE_GAP, PIPE_WIDTH, canvas.height);
+            
+            // Pipe "lips" or edges for detail
+            ctx.fillStyle = "#ff4d4d";
+            ctx.fillRect(pipe.x - 2, pipe.top - 10, PIPE_WIDTH + 4, 10);
+            ctx.fillRect(pipe.x - 2, pipe.top + PIPE_GAP, PIPE_WIDTH + 4, 10);
+        });
+    }
+
+    function updatePipes() {
+        if (!gameStarted) return;
+
+        pipes.forEach(pipe => {
+            pipe.x -= PIPE_SPEED;
+
+            // Hitbox (slightly smaller than visuals for fairness)
+            if (
+                sperm.x + 4 > pipe.x && 
+                sperm.x - 4 < pipe.x + PIPE_WIDTH && 
+                (sperm.y - 4 < pipe.top || sperm.y + 4 > pipe.top + PIPE_GAP)
+            ) {
+                endGame();
+            }
+
+            if (!pipe.passed && pipe.x + PIPE_WIDTH < sperm.x) {
+                score++;
+                pipe.passed = true;
+            }
+        });
+
+        if (pipes.length > 0 && pipes[0].x < -PIPE_WIDTH - 10) pipes.shift();
+    }
+
+    function drawUI() {
+        ctx.fillStyle = "white";
+        ctx.font = "bold 20px Arial";
+        ctx.textAlign = "left";
+        // Positioned with 30px padding so it's never "cut off"
+        ctx.fillText(`SURVIVED: ${score}`, 25, 45);
+
+        if (!gameStarted && !gameOver) {
+            ctx.textAlign = "center";
+            ctx.font = "24px Arial";
+            ctx.fillText("READY TO SWIM?", canvas.width / 2, canvas.height / 2 + 50);
+        }
+    }
+
+    function endGame() {
+        gameOver = true;
+    }
+
+    function resetGame() {
+        sperm.y = 300;
+        sperm.velocity = 0;
+        pipes = [];
+        score = 0;
+        frameCount = 0;
+        gameOver = false;
+        gameStarted = false;
+        loop();
+    }
+
+    function loop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Background "Cells" for depth
+        ctx.fillStyle = "rgba(100, 0, 0, 0.1)";
+        for(let i=0; i<3; i++) {
+            ctx.beginPath();
+            ctx.arc((frameCount + i*200) % (canvas.width+100) - 50, 100 + i*150, 40, 0, Math.PI*2);
+            ctx.fill();
+        }
+
+        if (gameStarted && frameCount % 90 === 0) spawnPipe();
+
+        sperm.update();
+        sperm.draw();
+        updatePipes();
+        drawPipes();
+        drawUI();
+
+        if (gameOver) {
+            ctx.fillStyle = "rgba(0,0,0,0.7)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "white";
+            ctx.textAlign = "center";
+            ctx.font = "bold 24px Arial";
+            ctx.fillText("CELL NEUTRALIZED", canvas.width / 2, canvas.height / 2 - 20);
+            ctx.font = "18px Arial";
+            ctx.fillText(`Final Distance: ${score}`, canvas.width / 2, canvas.height / 2 + 20);
+            ctx.fillText("TAP TO TRY AGAIN", canvas.width / 2, canvas.height / 2 + 60);
+            return;
+        }
+
+        frameCount++;
+        requestAnimationFrame(loop);
+    }
+
+    function handleInput() {
+        if (gameOver) {
+            resetGame();
+        } else {
+            gameStarted = true;
+            sperm.velocity = JUMP;
+        }
+    }
+
+    window.addEventListener('keydown', (e) => { if (e.code === 'Space') handleInput(); });
+    canvas.addEventListener('mousedown', (e) => { e.preventDefault(); handleInput(); });
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); }, {passive: false});
+
+    loop();
+</script>
+</body>
+</html>
